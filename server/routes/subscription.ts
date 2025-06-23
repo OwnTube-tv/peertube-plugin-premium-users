@@ -97,7 +97,7 @@ export class SubscriptionRoute {
     const subscription = await this.getStripeSubscription(res, userInfo.customerId)
 
     if (!subscription) {
-      res.status(404).json({})
+      this.peertubeHelpers.logger.info(`No subscription found for user ${String(user.id)}`)
       return
     }
 
