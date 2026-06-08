@@ -131,9 +131,12 @@ export async function register ({
         )
       )
 
+      const instanceBanner = (await peertubeHelpers.getServerConfig()).instance.banners
+        .sort((a, b) => a.width - b.width).find(b => b.width <= 800)
+
       const wrapper = uiBuilder.div(
         [
-          uiBuilder.img('/client/assets/images/icons/icon-192x192.png', 'instance-logo'),
+          instanceBanner?.fileUrl ? uiBuilder.img(instanceBanner.fileUrl, 'instance-logo') : null,
           uiBuilder.h2(await peertubeHelpers.translate('Become a premium user')),
           uiBuilder.p(await peertubeHelpers.translate(
             'Get access to premium videos and helps us to continue our work.'
@@ -154,7 +157,7 @@ export async function register ({
               href: '/login?redirect=/my-account/p/premium'
             })
           ], 'action-buttons d-flex justify-content-center flex-column mb-4 mx-sm-auto')
-        ],
+        ].filter(r => !!r),
         'plugin-premium-users become-premium margin-content pt-4 text-center mx-auto px-4 px-md-0'
       )
 
