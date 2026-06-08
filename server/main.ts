@@ -3,11 +3,11 @@ import {
   type MVideoFormattableDetails,
   type RegisterServerOptions,
   PeerTubeHelpers,
-  MVideoFullLight,
   MVideoWithAllFiles,
   SettingEntries,
   MUser,
-  type serverHookObject
+  type serverHookObject,
+  MVideoFull
 } from '@peertube/peertube-types'
 import Stripe from 'stripe'
 import express from 'express'
@@ -232,7 +232,7 @@ async function register ({
 
   registerHook({
     target: 'action:api.video.updated',
-    handler: async ({ video, body }: { video: MVideoFullLight, body: any }) => {
+    handler: async ({ video, body }: { video: MVideoFull, body: any }) => {
       if (body.pluginData?.[VIDEO_FIELD_IS_PREMIUM_CONTENT] === 'true') {
         logger.debug(`${video.uuid} is premium video`)
         await storage.addPremiumVideo(video.uuid)
@@ -248,7 +248,7 @@ async function register ({
       result: AllowedResult,
       { video }:
       {
-        video: MVideoFullLight
+        video: MVideo
       }
     ): Promise<AllowedResult> => {
       if (!result.allowed) return result
@@ -267,7 +267,7 @@ async function register ({
       result: AllowedResult,
       { video }:
       {
-        video: MVideoFullLight
+        video: MVideo
       }
     ): Promise<AllowedResult> => {
       if (!result.allowed) return result

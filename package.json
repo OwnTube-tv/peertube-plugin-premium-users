@@ -70,7 +70,7 @@
     "typescript": "^5.4.3"
   },
   "dependencies": {
-    "@peertube/peertube-types": "^6.3.0",
+    "@peertube/peertube-types": "^8.2.0",
     "@types/gtag.js": "^0.0.20",
     "@types/sequelize": "^4.28.20",
     "express": "^4.19.2",
