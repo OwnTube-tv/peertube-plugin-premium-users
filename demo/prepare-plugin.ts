@@ -286,14 +286,18 @@ const run = async () => {
   let videosTranscoded = false
 
   while (!videosTranscoded) {
-    const finished = (await Promise.all([
-      await ptFetch('/videos/' + replacementVideo.shortUUID),
-      await ptFetch('/videos/' + premiumVideo.shortUUID),
-    ]) as { state: { id: number } }[]).filter((result) => result.state.id === 1)
+    try {
+      const finished = (await Promise.all([
+        ptFetch('/videos/' + replacementVideo.shortUUID),
+        ptFetch('/videos/' + premiumVideo.shortUUID),
+      ]) as { state: { id: number } }[]).filter((result) => result.state.id === 1)
 
-    if (finished.length > 1) {
-      videosTranscoded = true
-    } else {
+      videosTranscoded = finished.length > 1
+    } catch (err) {
+      logger.error('Failed to check transcoding status, retrying...', { err })
+    }
+
+    if (!videosTranscoded) {
       await new Promise(resolve => {
         setTimeout(resolve, 1000)
       })
@@ -341,8 +345,14 @@ const cleanup = async () => {
     await run()
   } catch (err) {
     logger.error('Failed', { err })
-    await cleanup()
-    process.exit()
+
+    try {
+      await cleanup()
+    } catch (cleanupErr) {
+      logger.error('Cleanup failed', { err: cleanupErr })
+    }
+
+    process.exit(1)
   }
 })().catch(err => logger.error(err))
 

@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 RUN apk add --update \
     curl dpkg\
@@ -8,7 +8,6 @@ RUN wget https://github.com/stripe/stripe-cli/releases/download/v1.21.9/stripe_1
 
 RUN npm install -g @peertube/peertube-cli
 
-VOLUME /app
 COPY ../ /app
 WORKDIR /app
 RUN npm ci && npm run build && npm pack

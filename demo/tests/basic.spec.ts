@@ -1,12 +1,45 @@
 import { test, expect, Page } from '@playwright/test';
 import Stripe from 'stripe'
+import { VIDEO_FIELD_IS_PREMIUM_CONTENT } from '../../shared/constants'
 
 const PAGE_URL = 'http://localhost:9000'
 
-const waitForVideoAndExpect = async (page: Page) => {
-  await page.waitForSelector('video')
+/**
+ * Assert the plugin's protection contract for the premium video on the
+ * current watch page, via the video API — deterministic and independent of
+ * whether the browser can actually decode the HLS stream:
+ *
+ * - non-premium viewers get the replacement video's streaming playlists
+ * - premium viewers get the video's own streaming playlists
+ * - downloads are disabled and torrent URLs stripped for everyone
+ */
+const expectVideoStream = async (page: Page, { premium, token }: { premium: boolean, token?: string }) => {
+  await page.waitForURL(/\/w\//, { timeout: 5_000 })
+  const shortUUID = page.url().match(/\/w\/([^/?#]+)/)?.[1] as string
+  expect(shortUUID).toBeTruthy()
 
-  await expect(page).toHaveScreenshot({ maxDiffPixelRatio: 0.03 })
+  const response = await page.request.get(`${PAGE_URL}/api/v1/videos/${shortUUID}`, {
+    headers: token ? { Authorization: 'Bearer ' + token } : {}
+  })
+  expect(response.ok()).toBe(true)
+
+  const video = await response.json()
+  expect(video.pluginData?.[VIDEO_FIELD_IS_PREMIUM_CONTENT]).toBe('true')
+  expect(video.streamingPlaylists.length).toBeGreaterThan(0)
+
+  for (const playlist of video.streamingPlaylists) {
+    if (premium) {
+      expect(playlist.playlistUrl).toContain(video.uuid)
+    } else {
+      expect(playlist.playlistUrl).not.toContain(video.uuid)
+    }
+
+    for (const file of playlist.files ?? []) {
+      expect(file.torrentUrl).toBeFalsy()
+    }
+  }
+
+  expect(video.downloadEnabled).toBe(false)
 }
 
 const disableModals = async (page: Page) => {
@@ -26,42 +59,39 @@ const disableModals = async (page: Page) => {
   })
 }
 
-const waitUntilUsersIsAuthenticated = async (page: Page) => {
-  let token
-  let subscriptionCreated = false
+const login = async (page: Page, username: string, password: string) => {
+  await page.goto(PAGE_URL + '/login')
+  await page.getByLabel(/username/i).fill(username)
+  await page.getByLabel(/password/i).fill(password)
+  await page.getByRole('button', { name: /login/i }).click()
+}
 
-  const timeout = setTimeout(() => {
-    expect(false, 'Expected /subscription endpoint to return HTTP status 200 within timeout.').toBe(true)
-  }, 5000)
+// The access token shows up in localStorage right after login has succeeded.
+const waitUntilUsersIsAuthenticated = async (page: Page): Promise<string> => {
+  const deadline = Date.now() + 5_000
 
-  while (!subscriptionCreated) {
+  while (Date.now() < deadline) {
     const { origins } = await page.request.storageState()
-    const { localStorage } = origins.find(o => o.origin.match(new RegExp(PAGE_URL))) || {};
-    ({ value: token } = localStorage?.find(s => s.name === 'access_token') || {})
+    const { localStorage } = origins.find(o => o.origin.match(new RegExp(PAGE_URL))) || {}
+    const token = localStorage?.find(s => s.name === 'access_token')?.value
 
     if (token) {
-      clearTimeout(timeout)
       return token
     }
 
     await new Promise(resolve => setTimeout(resolve, 100))
   }
 
-  return ''
+  throw new Error('No access_token appeared in localStorage within 5s — login failed?')
 }
 
+// Premium status arrives via the Stripe webhook roundtrip, which takes a few
+// seconds through `stripe listen`.
 const waitUntilUserIsPremium = async (page: Page) => {
-  let token
-  let subscriptionCreated = false
+  const token = await waitUntilUsersIsAuthenticated(page)
+  const deadline = Date.now() + 15_000
 
-  const timeout = setTimeout(() => {
-    expect(false, 'Expected /subscription endpoint to return HTTP status 200 within timeout.').toBe(true)
-  }, 20000)
-
-  while (!subscriptionCreated) {
-    if (!token) {
-      token = await waitUntilUsersIsAuthenticated(page)
-    }
+  while (Date.now() < deadline) {
     const response = await page.request.get(`${PAGE_URL}/plugins/premium-users/router/subscription`, {
       headers: {
         Authorization: 'Bearer ' + token
@@ -69,12 +99,13 @@ const waitUntilUserIsPremium = async (page: Page) => {
     })
 
     if (response.ok()) {
-      subscriptionCreated = true
-      clearTimeout(timeout)
+      return
     }
 
     await new Promise(resolve => setTimeout(resolve, 500))
   }
+
+  throw new Error('The /subscription endpoint never returned HTTP 200 within 15s — webhook not processed?')
 }
 
 test.describe('anonymous user', () => {
@@ -83,9 +114,7 @@ test.describe('anonymous user', () => {
 
     await page.getByText('Premium video').click()
 
-    await waitForVideoAndExpect(page)
-
-    await expect(page.innerHTML).not.toContain(/download/i)
+    await expectVideoStream(page, { premium: false })
   })
 })
 
@@ -105,7 +134,13 @@ test.describe('authenticated user', () => {
   test('becomes a premium user', async ({ page }) => {
     await page.goto(PAGE_URL)
 
-    await page.getByText('Become premium').click()
+    // The plugin registers its client route asynchronously; clicking the menu
+    // item before that leaves the SPA on the home page, so retry until the
+    // premium page has loaded.
+    await expect(async () => {
+      await page.getByText('Become premium').click()
+      await page.waitForURL(/\/p\/premium/, { timeout: 2000 })
+    }).toPass()
 
     await page.getByTestId('premium_users-button-create_account').click()
 
@@ -127,30 +162,51 @@ test.describe('authenticated user', () => {
 
     await page.getByTestId('premium_users-button-pay_month').click()
 
-    await page.getByLabel(/card number/i).fill('4242 4242 4242 4242')
+    // Stripe Checkout renders differently depending on the visitor's region:
+    // either a payment method accordion precedes the card fields (e.g. Card +
+    // Klarna for Swedish visitors), or the card fields are visible directly.
+    const cardNumber = page.getByLabel(/card number/i)
+    const cardAccordion = page.getByTestId('card-accordion-item-button')
+    await cardNumber.or(cardAccordion).first().waitFor({ state: 'attached' })
+
+    if (await cardNumber.count() === 0) {
+      // The accordion button never passes actionability checks, so dispatch
+      // the click programmatically.
+      await cardAccordion.dispatchEvent('click')
+    }
+
+    await cardNumber.fill('4242 4242 4242 4242')
     await page.getByLabel(/expiration/i).fill('05/32')
     await page.getByPlaceholder(/cvc/i).fill('123')
     await page.getByPlaceholder(/full name/i).fill('John Premium')
-    await page.getByLabel(/country/i).selectOption('Sweden')
+
+    // "Save my information" is sometimes pre-checked and then demands a phone
+    // number (whose country-code select also shadows the billing country
+    // field) — opt out before touching the country selector.
+    const saveInfo = page.getByRole('checkbox', { name: /save my information/i })
+    if (await saveInfo.count() > 0 && await saveInfo.isChecked()) {
+      await saveInfo.dispatchEvent('click')
+    }
+
+    await page.getByLabel(/country or region/i).selectOption('Sweden')
     await page.getByTestId('hosted-payment-submit-button').click()
 
     await page.waitForURL(/premium/i)
-    await page.getByText(/you're a premium/i).waitFor()
+    // Premium status lands via the Stripe webhook roundtrip — the one wait
+    // that legitimately takes more than a few seconds
+    await page.getByText(/you're a premium/i).waitFor({ timeout: 20_000 })
   })
 
   test('loads premium video', async ({ page }) => {
-    await page.goto(PAGE_URL + '/login')
+    await login(page, EMAIL, PASSWORD)
 
-    await page.getByLabel(/username/i).fill(EMAIL)
-    await page.getByLabel(/password/i).fill(PASSWORD)
-    await page.getByRole('button', { name: 'show'} ).click()
-    await page.getByRole('button', { name: 'login' }).click()
+    const token = await waitUntilUsersIsAuthenticated(page)
 
     await page.getByRole('navigation').getByText('Home').click()
 
     await page.getByText(/premium video/i).click()
 
-    await waitForVideoAndExpect(page)
+    await expectVideoStream(page, { premium: true, token })
   })
 })
 
@@ -166,10 +222,7 @@ test.describe('add premium user via Stripe', () => {
   })
 
   test('setup user and add subscription in Stripe', async ({ page }) => {
-    await page.goto(PAGE_URL + '/login')
-    await page.getByLabel(/username/i).fill('root')
-    await page.getByLabel(/password/i).fill(process.env.PT_INITIAL_ROOT_PASSWORD as string)
-    await page.getByRole('button', { name: /login/i }).click()
+    await login(page, 'root', process.env.PT_INITIAL_ROOT_PASSWORD as string)
 
     await page.getByRole('navigation').getByText(/overview/i).click()
     await page.getByText(/create user/i).click()
@@ -180,7 +233,17 @@ test.describe('add premium user via Stripe', () => {
     await page.getByLabel(/password/i).fill(PASSWORD)
     await page.getByText(/create user/i).click()
 
-    const prices = await stripe.prices.list({ type: 'recurring' })
+    // Pin the subscription to the plugin's test product — the sandbox is
+    // shared, so picking the first recurring price in the account could grab
+    // an unrelated product.
+    const { data: [product] } = await stripe.products.search({
+      query: 'name:"peertube_plugin_premium_users-auto_test-product"'
+    })
+    expect(product, 'Plugin test product exists in Stripe (created by prepare-plugin)').toBeTruthy()
+
+    const prices = await stripe.prices.list({ product: product.id, type: 'recurring' })
+    expect(prices.data.length, 'Plugin test product has at least one recurring price').toBeGreaterThan(0)
+
     const customer = await stripe.customers.create({ email: EMAIL })
     await stripe.subscriptions.create({
       customer: customer.id,
@@ -195,27 +258,23 @@ test.describe('add premium user via Stripe', () => {
   })
 
   test('user should be premium when added via Stripe', async ({ page }) => {
-    await page.goto(PAGE_URL + '/login')
-    await page.getByLabel(/username/i).fill(EMAIL)
-    await page.getByLabel(/password/i).fill(PASSWORD)
-    await page.getByRole('button', { name: /login/i }).click()
+    await login(page, EMAIL, PASSWORD)
 
     await waitUntilUserIsPremium(page)
     await page.goto(PAGE_URL + '/my-account/p/premium')
 
     await page.getByText(/you're a premium/i).waitFor()
 
+    const token = await waitUntilUsersIsAuthenticated(page)
+
     await page.getByRole('navigation').getByText(/Home/i).click()
     await page.getByText('Premium video').click()
 
-    await waitForVideoAndExpect(page)
+    await expectVideoStream(page, { premium: true, token })
   })
 
   test('Stripe subscription should be canceled when Peertube account is deleted', async ({ page }) => {
-    await page.goto(PAGE_URL + '/login')
-    await page.getByLabel(/username/i).fill('root')
-    await page.getByLabel(/password/i).fill(process.env.PT_INITIAL_ROOT_PASSWORD as string)
-    await page.getByRole('button', { name: /login/i }).click()
+    await login(page, 'root', process.env.PT_INITIAL_ROOT_PASSWORD as string)
     await waitUntilUsersIsAuthenticated(page)
 
     await page.goto(PAGE_URL + '/a/external_premium' + TEST_ID + '/video-channels')
@@ -223,9 +282,7 @@ test.describe('add premium user via Stripe', () => {
     await page.getByText('Delete user').click()
     await page.getByText('Confirm').click()
 
-    const waiter = setTimeout(() => {
-      expect(false, 'Stripe subscription is cancelled').toEqual(true)
-    }, 10 * 1000)
+    const deadline = Date.now() + 10_000
 
     while (true) {
       const { data: [customer] } = await stripe.customers.list({
@@ -235,19 +292,18 @@ test.describe('add premium user via Stripe', () => {
 
       expect(customer, 'Deleted user exists in Stripe').toBeTruthy()
 
-      try {
-        expect(customer.subscriptions?.data.length, 'Stripe subscription is canceled').toEqual(0)
-        expect(
-          Object.keys(customer.metadata)
-            .find(key => !!key.match(/deletedAt/i)), 'deletedAt metadata exist on Stripe customer'
-        ).toBeTruthy()
-      } catch (ignoreErr) {
-        await new Promise(resolve => setTimeout(resolve, 500))
-        continue
+      const canceled = customer.subscriptions?.data.length === 0 &&
+        Object.keys(customer.metadata).some(key => key.match(/deletedAt/i))
+
+      if (canceled) {
+        break
       }
 
-      clearTimeout(waiter)
-      break
+      if (Date.now() > deadline) {
+        throw new Error('Stripe subscription was not canceled within 10s of account deletion')
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 500))
     }
   })
 })
