@@ -30,7 +30,13 @@ export default defineConfig({
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
-    screenshot: 'on'
+    screenshot: 'on',
+
+    /* Everything against the local demo is fast — keep timeouts tight so
+       failures surface in seconds, not after 30s defaults. Waits that
+       legitimately take longer (Stripe webhook roundtrips) set their own. */
+    actionTimeout: 15_000,
+    navigationTimeout: 15_000
   },
 
   /* Configure projects for major browsers */

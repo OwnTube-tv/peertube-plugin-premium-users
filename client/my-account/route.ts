@@ -22,7 +22,7 @@ export const buildOnMount = (peertubeHelpers: RegisterClientHelpers) =>
           value: await translate('Close')
         },
         content: await translate(
-          'Your payment succeeded and will short be registered, it may take awhile depending on your payment method.'
+          'Your payment succeeded and will be registered shortly. It may take a while depending on your payment method.'
         ),
         close: true
       })

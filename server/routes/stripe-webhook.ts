@@ -39,7 +39,18 @@ export class StripeWebhook {
   }
 
   routeHandler = async (req: express.Request, res: express.Response): Promise<void> => {
-    const stripe = await this.getStripe()
+    const stripeApiKey = await this.settingsManager.getSetting(SETTING_STRIPE_API_KEY) as string
+
+    if (!stripeApiKey) {
+      this.logger.error('Can\'t handle Stripe webhook since there\'s no Stripe API key configured.')
+      res.status(500).json({})
+      return
+    }
+
+    if (!this.stripe) {
+      this.stripe = new Stripe(stripeApiKey)
+    }
+    const stripe = this.stripe
     const webhookSecret = await this.settingsManager.getSetting(SETTING_STRIPE_WEBHOOK_SECRET) as string
 
     if (!webhookSecret) {
