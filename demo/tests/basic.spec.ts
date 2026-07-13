@@ -118,6 +118,81 @@ test.describe('anonymous user', () => {
   })
 })
 
+// Sign up a new account via the plugin's "Become premium" page and land on
+// the premium payment alternatives page.
+const signupViaBecomePremium = async (
+  page: Page,
+  { name, email, password }: { name: string, email: string, password: string }
+): Promise<void> => {
+  await page.goto(PAGE_URL)
+
+  // The plugin registers its client route asynchronously; clicking the menu
+  // item before that leaves the SPA on the home page, so retry until the
+  // premium page has loaded.
+  await expect(async () => {
+    await page.getByText('Become premium').click()
+    await page.waitForURL(/\/p\/premium/, { timeout: 2000 })
+  }).toPass()
+
+  await page.getByTestId('premium_users-button-create_account').click()
+
+  await page.waitForURL(/signup/i)
+
+  await page.getByRole('button', { name: 'Create an account' }).click()
+
+  await page.getByText(/I am at least/i).click()
+  await page.getByText(/go to the next step/i).click()
+
+  await page.getByLabel(/public name/i).fill(name)
+  await page.getByLabel(/email/i).fill(email)
+  await page.getByLabel(/password/i).fill(password)
+
+  await page.getByText(/go to the next step/i).click()
+
+  await page.getByText(/I don't want to create a channel/i).click()
+  await page.waitForURL(/premium/i)
+}
+
+// Fill in and submit the Stripe Checkout page with the standard test card,
+// then wait for the premium confirmation back on the instance.
+const completeStripeCheckout = async (page: Page, cardholderName: string): Promise<void> => {
+  // Stripe Checkout renders differently depending on the visitor's region:
+  // either a payment method accordion precedes the card fields (e.g. Card +
+  // Klarna for Swedish visitors), or the card fields are visible directly.
+  const cardNumber = page.getByLabel(/card number/i)
+  const cardAccordion = page.getByTestId('card-accordion-item-button')
+  await cardNumber.or(cardAccordion).first().waitFor({ state: 'attached' })
+
+  if (await cardNumber.count() === 0) {
+    // The accordion button never passes actionability checks, so dispatch
+    // the click programmatically.
+    await cardAccordion.dispatchEvent('click')
+  }
+
+  await cardNumber.fill('4242 4242 4242 4242')
+  await page.getByLabel(/expiration/i).fill('05/32')
+  await page.getByPlaceholder(/cvc/i).fill('123')
+  await page.getByPlaceholder(/full name/i).fill(cardholderName)
+
+  // "Save my information" is sometimes pre-checked and then demands a phone
+  // number (whose country-code select also shadows the billing country
+  // field) — opt out before touching the country selector.
+  const saveInfo = page.getByRole('checkbox', { name: /save my information/i })
+  if (await saveInfo.count() > 0 && await saveInfo.isChecked()) {
+    await saveInfo.dispatchEvent('click')
+  }
+
+  await page.getByLabel(/country or region/i).selectOption('Sweden')
+  await page.getByTestId('hosted-payment-submit-button').click()
+
+  // Stripe processes the payment (or, for trials, a setup intent) before
+  // redirecting back — legitimately slower than a page navigation
+  await page.waitForURL(/premium/i, { timeout: 20_000 })
+  // Premium status lands via the Stripe webhook roundtrip — also
+  // legitimately slower than a few seconds
+  await page.getByText(/you're a premium/i).waitFor({ timeout: 20_000 })
+}
+
 test.describe('authenticated user', () => {
   test.describe.configure({ mode: 'serial' });
   test.describe.configure({ timeout: 60000 }) // Increase timeout to handle Stripe checkout
@@ -132,72 +207,65 @@ test.describe('authenticated user', () => {
   })
 
   test('becomes a premium user', async ({ page }) => {
-    await page.goto(PAGE_URL)
-
-    // The plugin registers its client route asynchronously; clicking the menu
-    // item before that leaves the SPA on the home page, so retry until the
-    // premium page has loaded.
-    await expect(async () => {
-      await page.getByText('Become premium').click()
-      await page.waitForURL(/\/p\/premium/, { timeout: 2000 })
-    }).toPass()
-
-    await page.getByTestId('premium_users-button-create_account').click()
-
-    await page.waitForURL(/signup/i)
-
-    await page.getByRole('button', { name: 'Create an account' }).click()
-
-    await page.getByText(/I am at least/i).click()
-    await page.getByText(/go to the next step/i).click()
-
-    await page.getByLabel(/public name/i).fill(NAME)
-    await page.getByLabel(/email/i).fill(EMAIL)
-    await page.getByLabel(/password/i).fill(PASSWORD)
-
-    await page.getByText(/go to the next step/i).click()
-
-    await page.getByText(/I don't want to create a channel/i).click()
-    await page.waitForURL(/premium/i)
+    await signupViaBecomePremium(page, { name: NAME, email: EMAIL, password: PASSWORD })
 
     await page.getByTestId('premium_users-button-pay_month').click()
 
-    // Stripe Checkout renders differently depending on the visitor's region:
-    // either a payment method accordion precedes the card fields (e.g. Card +
-    // Klarna for Swedish visitors), or the card fields are visible directly.
-    const cardNumber = page.getByLabel(/card number/i)
-    const cardAccordion = page.getByTestId('card-accordion-item-button')
-    await cardNumber.or(cardAccordion).first().waitFor({ state: 'attached' })
-
-    if (await cardNumber.count() === 0) {
-      // The accordion button never passes actionability checks, so dispatch
-      // the click programmatically.
-      await cardAccordion.dispatchEvent('click')
-    }
-
-    await cardNumber.fill('4242 4242 4242 4242')
-    await page.getByLabel(/expiration/i).fill('05/32')
-    await page.getByPlaceholder(/cvc/i).fill('123')
-    await page.getByPlaceholder(/full name/i).fill('John Premium')
-
-    // "Save my information" is sometimes pre-checked and then demands a phone
-    // number (whose country-code select also shadows the billing country
-    // field) — opt out before touching the country selector.
-    const saveInfo = page.getByRole('checkbox', { name: /save my information/i })
-    if (await saveInfo.count() > 0 && await saveInfo.isChecked()) {
-      await saveInfo.dispatchEvent('click')
-    }
-
-    await page.getByLabel(/country or region/i).selectOption('Sweden')
-    await page.getByTestId('hosted-payment-submit-button').click()
-
-    await page.waitForURL(/premium/i)
-    // Premium status lands via the Stripe webhook roundtrip — the one wait
-    // that legitimately takes more than a few seconds
-    await page.getByText(/you're a premium/i).waitFor({ timeout: 20_000 })
+    await completeStripeCheckout(page, 'John Premium')
   })
 
   test('loads premium video', async ({ page }) => {
+    await login(page, EMAIL, PASSWORD)
+
+    const token = await waitUntilUsersIsAuthenticated(page)
+
+    await page.getByRole('navigation').getByText('Home').click()
+
+    await page.getByText(/premium video/i).click()
+
+    await expectVideoStream(page, { premium: true, token })
+  })
+})
+
+test.describe('trial user', () => {
+  test.describe.configure({ mode: 'serial' });
+  test.describe.configure({ timeout: 60000 }) // Increase timeout to handle Stripe checkout
+
+  const stripe = new Stripe(process.env.STRIPE_API_KEY as string)
+  const TEST_ID = Math.round(Date.now() / 1000)
+  const NAME = 'Tina Trial ' + TEST_ID
+  const EMAIL = `trial${TEST_ID}@premi.um`
+  const PASSWORD = 'testtest'
+
+  test.beforeEach(async ({ page }) => {
+    await disableModals(page)
+  })
+
+  test('starts a free trial on the yearly price', async ({ page }) => {
+    await signupViaBecomePremium(page, { name: NAME, email: EMAIL, password: PASSWORD })
+
+    // The demo configures the yearly price with a 14 day free trial and no
+    // coupon — the offer is presented instead of a discount
+    await page.getByText(/first 14 days free/i).waitFor()
+
+    await page.getByTestId('premium_users-button-pay_year').click()
+
+    await completeStripeCheckout(page, 'Tina Trial')
+
+    // Premium right away, backed by a trialing subscription with no charge
+    const token = await waitUntilUsersIsAuthenticated(page)
+    const subscriptionRes = await page.request.get(`${PAGE_URL}/plugins/premium-users/router/subscription`, {
+      headers: { Authorization: 'Bearer ' + token }
+    })
+    expect(subscriptionRes.ok()).toBe(true)
+    expect((await subscriptionRes.json()).status).toBe('trialing')
+
+    const { data: [customer] } = await stripe.customers.list({ email: EMAIL, expand: ['data.subscriptions'] })
+    expect(customer, 'Customer exists in Stripe').toBeTruthy()
+    expect(customer.subscriptions?.data[0]?.status).toBe('trialing')
+  })
+
+  test('loads premium video during the trial', async ({ page }) => {
     await login(page, EMAIL, PASSWORD)
 
     const token = await waitUntilUsersIsAuthenticated(page)

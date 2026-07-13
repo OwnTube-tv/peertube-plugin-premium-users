@@ -1,7 +1,15 @@
 import { PeerTubeHelpers, PluginSettingsManager } from '@peertube/peertube-types'
 import Stripe from 'stripe'
 import { PluginUserInfo } from './types'
-import { SETTING_STRIPE_PRODUCT_ID } from '../shared/constants'
+import {
+  PRICE_COUPON_NONE,
+  PRICE_SORT_HIGHEST_FIRST,
+  PRICE_SORT_LOWEST_FIRST,
+  SETTING_STRIPE_COUPON_ID,
+  SETTING_STRIPE_PRODUCT_ID,
+  getPriceCouponSettingName,
+  getPriceTrialDaysSettingName
+} from '../shared/constants'
 
 export const ONE_DAY = 60 * 60 * 24 * 1000
 
@@ -51,6 +59,89 @@ export const getStripeCoupons = async (stripeApiKey: string): Promise<Stripe.Cou
   const coupons = await stripe.coupons.list()
 
   return coupons.data
+}
+
+const INTERVAL_DAYS: { [interval: string]: number } = { day: 1, week: 7, month: 30, year: 365 }
+
+const getBillingPeriodDays = (price: Stripe.Price): number =>
+  (INTERVAL_DAYS[price.recurring?.interval ?? 'year'] ?? 365) * (price.recurring?.interval_count ?? 1)
+
+export type PriceSortOrder = typeof PRICE_SORT_LOWEST_FIRST | typeof PRICE_SORT_HIGHEST_FIRST
+
+/**
+ * Sort prices for display (configurable via the price-sort-order setting):
+ * cheapest or most expensive first. The direction only applies to the amount
+ * — ties always break on shortest billing period and finally price id, so
+ * every instance and view renders the same deterministic order. Prices
+ * without a unit amount (e.g. tiered) always sort last.
+ */
+export const sortPricesForDisplay = <T extends Stripe.Price> (
+  prices: T[],
+  order: PriceSortOrder = PRICE_SORT_LOWEST_FIRST
+): T[] => {
+  const direction = order === PRICE_SORT_HIGHEST_FIRST ? -1 : 1
+
+  return [...prices].sort((a, b) => {
+    if ((a.unit_amount == null) !== (b.unit_amount == null)) {
+      return a.unit_amount == null ? 1 : -1
+    }
+
+    return (direction * ((a.unit_amount ?? 0) - (b.unit_amount ?? 0))) ||
+      (getBillingPeriodDays(a) - getBillingPeriodDays(b)) ||
+      a.id.localeCompare(b.id)
+  })
+}
+
+export const getStripePrices = async (stripeApiKey: string, productId: string): Promise<Stripe.Price[]> => {
+  const stripe = new Stripe(stripeApiKey)
+
+  const prices = await stripe.prices.list({
+    active: true,
+    product: productId,
+    type: 'recurring',
+    limit: 12
+  })
+
+  return sortPricesForDisplay(prices.data)
+}
+
+/**
+ * Resolve which coupon or free trial applies to a price. The per-price coupon
+ * setting overrides the default coupon setting ('' = inherit the default,
+ * PRICE_COUPON_NONE = explicitly no coupon). The free trial only applies when
+ * no coupon does.
+ */
+export const resolvePriceSettings = async (
+  settingsManager: PluginSettingsManager,
+  priceId: string
+): Promise<{ couponId?: string, trialDays?: number }> => {
+  const [couponOverride, defaultCouponId, trialDaysRaw] = await Promise.all([
+    settingsManager.getSetting(getPriceCouponSettingName(priceId)),
+    settingsManager.getSetting(SETTING_STRIPE_COUPON_ID),
+    settingsManager.getSetting(getPriceTrialDaysSettingName(priceId))
+  ]) as [string | undefined, string | undefined, string | undefined]
+
+  if (couponOverride !== PRICE_COUPON_NONE) {
+    const couponId = couponOverride || defaultCouponId
+
+    if (couponId) {
+      return { couponId }
+    }
+  }
+
+  // Strictly positive integers only — parseInt would silently truncate
+  // values like "14.5" or "14days"
+  const trimmed = String(trialDaysRaw ?? '').trim()
+
+  if (/^\d+$/.test(trimmed)) {
+    const trialDays = parseInt(trimmed, 10)
+
+    if (trialDays > 0) {
+      return { trialDays }
+    }
+  }
+
+  return {}
 }
 
 export const isPremiumUser = (userInfo: PluginUserInfo | undefined): boolean => {

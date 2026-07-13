@@ -15,7 +15,11 @@ import shortUUID from 'short-uuid'
 import sequelize from 'sequelize'
 import { StripeWebhook } from './routes/stripe-webhook'
 import {
+  PRICE_COUPON_NONE,
+  PRICE_SORT_HIGHEST_FIRST,
+  PRICE_SORT_LOWEST_FIRST,
   SETTING_ENABLE_PLUGIN,
+  SETTING_PRICE_SORT_ORDER,
   SETTING_REPLACEMENT_VIDEO,
   SETTING_STRIPE_API_KEY,
   SETTING_STRIPE_COUPON_ID,
@@ -23,7 +27,9 @@ import {
   SETTING_STRIPE_PRODUCT_ID,
   SETTING_STRIPE_WEBHOOK_SECRET,
   SETTING_WHITELIST_USER_AGENT,
-  VIDEO_FIELD_IS_PREMIUM_CONTENT
+  VIDEO_FIELD_IS_PREMIUM_CONTENT,
+  getPriceCouponSettingName,
+  getPriceTrialDaysSettingName
 } from '../shared/constants'
 import { Storage } from './storage'
 import { SubscriptionRoute } from './routes/subscription'
@@ -31,6 +37,7 @@ import {
   getCustomerSubscriptions,
   getStripeCoupons,
   getStripeCustomerMetadataFieldNames,
+  getStripePrices,
   getStripeProducts,
   isPremiumUser
 } from './utils'
@@ -131,6 +138,25 @@ async function register ({
       `
   })
 
+  registerSetting({
+    name: SETTING_PRICE_SORT_ORDER,
+    label: 'Price display order',
+    type: 'select',
+    default: PRICE_SORT_LOWEST_FIRST,
+    options: [
+      {
+        label: 'Lowest price first',
+        value: PRICE_SORT_LOWEST_FIRST
+      },
+      {
+        label: 'Highest price first',
+        value: PRICE_SORT_HIGHEST_FIRST
+      }
+    ],
+    private: true,
+    descriptionHTML: 'The order in which the payment alternatives are presented on the Become premium pages.'
+  })
+
   const loadReplacementVideo = async (replacementVideoUrl: string): Promise<void> => {
     if (!replacementVideoUrl) {
       logger.debug('No replacement video URL has been configured.')
@@ -190,7 +216,7 @@ async function register ({
 
     registerSetting({
       name: SETTING_STRIPE_COUPON_ID,
-      label: 'Select a coupon if you\'d like to apply a coupon to the subcription.',
+      label: 'Default coupon to apply to subscriptions (all prices, unless overridden per price below).',
       type: 'select',
       default: '',
       options: [
@@ -200,16 +226,84 @@ async function register ({
         },
         ...stripeCoupons.filter(c => c.valid).map((coupon) => ({
           value: coupon.id,
-          label: coupon.name as string + ' (' +
-            (coupon.amount_off
-              ? (coupon.amount_off / 100).toString() + ' ' +
-            (coupon.currency ?? '')
-              : (coupon.percent_off?.toString() ?? '') + ' %') +
-            ')'
+          label: formatCouponLabel(coupon)
         }))
       ],
       private: true
     })
+  }
+
+  const formatCouponLabel = (coupon: Stripe.Coupon): string =>
+    (coupon.name ?? coupon.id) + ' (' +
+      (coupon.amount_off
+        ? (coupon.amount_off / 100).toString() + ' ' + (coupon.currency ?? '')
+        : (coupon.percent_off?.toString() ?? '') + ' %') +
+      ')'
+
+  const formatPriceLabel = (price: Stripe.Price): string => {
+    const amount = price.unit_amount != null
+      ? (price.unit_amount / 100).toString() + ' ' + price.currency.toUpperCase()
+      : (price.nickname ?? 'custom amount')
+    const intervalCount = price.recurring?.interval_count ?? 1
+    const interval = (intervalCount > 1 ? intervalCount.toString() + ' ' : '') +
+      (price.recurring?.interval ?? '?') + (intervalCount > 1 ? 's' : '')
+
+    return amount + ' / ' + interval
+  }
+
+  const registerPerPriceSettings = async (apiKey: string): Promise<void> => {
+    const productId = await settingsManager.getSetting(SETTING_STRIPE_PRODUCT_ID) as string
+
+    if (!apiKey || !productId) {
+      return
+    }
+
+    let stripePrices: Stripe.Price[] = []
+    let stripeCoupons: Stripe.Coupon[] = []
+
+    try {
+      [stripePrices, stripeCoupons] = await Promise.all([
+        getStripePrices(apiKey, productId),
+        getStripeCoupons(apiKey)
+      ])
+    } catch (err: any) {
+      logger.info('Couldn\'t fetch Stripe prices for the per-price settings', { err })
+      return
+    }
+
+    for (const price of stripePrices) {
+      registerSetting({
+        name: getPriceCouponSettingName(price.id),
+        label: `Coupon for ${formatPriceLabel(price)} (${price.id})`,
+        type: 'select',
+        default: '',
+        options: [
+          {
+            label: 'Inherit the default coupon',
+            value: ''
+          },
+          {
+            label: 'None (offers a free trial instead, if configured below)',
+            value: PRICE_COUPON_NONE
+          },
+          ...stripeCoupons.filter(c => c.valid).map((coupon) => ({
+            value: coupon.id,
+            label: formatCouponLabel(coupon)
+          }))
+        ],
+        private: true
+      })
+
+      registerSetting({
+        name: getPriceTrialDaysSettingName(price.id),
+        label: `Free trial days for ${formatPriceLabel(price)} (${price.id})`,
+        type: 'input',
+        default: '',
+        descriptionHTML:
+          'Number of days of free trial offered when no coupon applies to this price. Empty = no free trial.',
+        private: true
+      })
+    }
   }
 
   const parseSettings = async (settings: SettingEntries): Promise<void> => {
@@ -218,7 +312,8 @@ async function register ({
     await Promise.all([
       loadReplacementVideo(settings[SETTING_REPLACEMENT_VIDEO] as string),
       registerStripeProductIdSetting(settings[SETTING_STRIPE_API_KEY] as string),
-      registerStripeCouponIdSetting(settings[SETTING_STRIPE_API_KEY] as string)
+      registerStripeCouponIdSetting(settings[SETTING_STRIPE_API_KEY] as string),
+      registerPerPriceSettings(settings[SETTING_STRIPE_API_KEY] as string)
     ])
   }
 

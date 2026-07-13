@@ -83,9 +83,10 @@ export const getFormattedPaymentAlternatives = async (
   const amountToSave = getAmountToSave(price)
   const discount = getDiscount(price)
   const formattedPrice = await getFormattedPrice(price, translate)
+  const hasTrial = !price.coupon && !!price.trialDays
   const hasButton = !!buttonOnClick
 
-  const button = uiBuilder.a(formattedPrice, {
+  const button = uiBuilder.a(hasTrial ? await translate('Start free trial') : formattedPrice, {
     class: 'primary-button peertube-button-link mb-4',
     'data-testid': `premium_users-button-pay_` + price.recurring?.interval
   })
@@ -108,6 +109,13 @@ export const getFormattedPaymentAlternatives = async (
         (await translate('You\'ll save AMOUNT_TO_SAVE.'))
           .replace('AMOUNT_TO_SAVE', String(formatAmount(Math.round(amountToSave), price.currency)))
       ], 'text-start')]),
+    ...(hasTrial
+      ? [uiBuilder.ul([
+        (await translate('First TRIAL_DAYS days free, then PRICE.'))
+          .replace('TRIAL_DAYS', String(price.trialDays))
+          .replace('PRICE', formattedPrice)
+      ], 'text-start')]
+      : []),
     ...(hasButton ? [button] : [
       uiBuilder.p(formattedPrice, 'mt-auto')
     ])
