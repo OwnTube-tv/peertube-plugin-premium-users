@@ -1,7 +1,14 @@
 import 'mocha'
-import { deepEqual, equal } from 'assert'
-import { PluginSettingsManager } from '@peertube/peertube-types'
-import { isPremiumUser, ONE_DAY, resolvePriceSettings, sortPricesForDisplay } from './utils.js'
+import { deepEqual, equal, ok } from 'assert'
+import { PeerTubeHelpers, PluginSettingsManager } from '@peertube/peertube-types'
+import type { NextFunction, Request, RequestHandler, Response } from 'express'
+import {
+  buildRouteHandlerWrapper,
+  isPremiumUser,
+  ONE_DAY,
+  resolvePriceSettings,
+  sortPricesForDisplay
+} from './utils.js'
 import Stripe from 'stripe'
 import {
   PRICE_COUPON_NONE,
@@ -163,6 +170,58 @@ describe('utils', () => {
         'highest-first'
       )
       deepEqual(sorted.map(p => p.id), ['month', 'year'])
+    })
+  })
+
+  describe('buildRouteHandlerWrapper', () => {
+    const noopLogger = { error () {} } as unknown as PeerTubeHelpers['logger']
+    const wrap = buildRouteHandlerWrapper(noopLogger)
+
+    const fakeRes = () => {
+      const res: any = { headersSent: false, statusCode: undefined, body: undefined }
+      res.status = (code: number) => { res.statusCode = code; return res }
+      res.json = (body: any) => { res.body = body; res.headersSent = true; return res }
+      return res as Response & { statusCode?: number }
+    }
+
+    it('passes through a handler that responds normally', async () => {
+      const res = fakeRes()
+      const handler: RequestHandler = (_req, r) => { r.status(200).json({ ok: true }) }
+      await wrap(handler)({} as Request, res, (() => {}) as NextFunction)
+      equal(res.statusCode, 200)
+    })
+
+    it('responds 500 when the handler rejects asynchronously', async () => {
+      const res = fakeRes()
+      const handler: RequestHandler = async () => { throw new Error('async boom') }
+      await wrap(handler)({} as Request, res, (() => {}) as NextFunction)
+      equal(res.statusCode, 500)
+    })
+
+    it('responds 500 when the handler throws synchronously', async () => {
+      const res = fakeRes()
+      const handler: RequestHandler = () => { throw new Error('sync boom') }
+      await wrap(handler)({} as Request, res, (() => {}) as NextFunction)
+      equal(res.statusCode, 500)
+    })
+
+    it('does not respond again if the handler already sent a response before throwing', async () => {
+      const res = fakeRes()
+      const handler: RequestHandler = (_req, r) => {
+        r.status(200).json({ ok: true })
+        throw new Error('boom after responding')
+      }
+      await wrap(handler)({} as Request, res, (() => {}) as NextFunction)
+      equal(res.statusCode, 200)
+    })
+
+    it('never rejects, so the error cannot reach the process', async () => {
+      const res = fakeRes()
+      const handler: RequestHandler = async () => { throw new Error('async boom') }
+      let rejected = false
+      await wrap(handler)({} as Request, res, (() => {}) as NextFunction)
+        .catch(() => { rejected = true })
+      ok(!rejected)
     })
   })
 })

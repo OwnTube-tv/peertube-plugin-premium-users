@@ -1,4 +1,5 @@
 import { PeerTubeHelpers, PluginSettingsManager } from '@peertube/peertube-types'
+import type { NextFunction, Request, RequestHandler, Response } from 'express'
 import Stripe from 'stripe'
 import { PluginUserInfo } from './types'
 import {
@@ -185,3 +186,24 @@ export const getCustomerSubscriptions = async (
     inactiveSubscriptions: subscriptions
   }
 }
+/**
+ * Wrap a route handler so that no error can escape it and reach PeerTube's
+ * process-level `unhandledRejection` handler, which calls `process.exit(1)`
+ * and takes the whole instance down. Awaiting the handler funnels both
+ * synchronous throws and async rejections into a single catch that logs the
+ * error and responds 500 (a retriable signal to callers such as Stripe),
+ * keeping the host alive.
+ */
+export const buildRouteHandlerWrapper = (logger: PeerTubeHelpers['logger']) =>
+  (handler: RequestHandler) =>
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+      try {
+        await handler(req, res, next)
+      } catch (err) {
+        logger.error('Unhandled error in a premium-users route handler.', { err })
+
+        if (!res.headersSent) {
+          res.status(500).json({})
+        }
+      }
+    }
