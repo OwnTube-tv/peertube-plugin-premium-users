@@ -1,0 +1,44 @@
+name: Publish to npm
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish — must match the version in package.json on the chosen ref
+        required: true
+permissions:
+  contents: read
+  # Required for npm provenance: the OIDC token ties the published tarball to
+  # this repo, commit and workflow run in a publicly verifiable attestation
+  id-token: write
+jobs:
+  publish:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          # Match production: our own web servers and PeerTube mainline both
+          # run Node 22
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Verify requested version matches package.json
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PKG_VERSION" != "${{ inputs.version }}" ]; then
+            echo "::error::package.json on this ref has version $PKG_VERSION, but the dispatch requested ${{ inputs.version }}"
+            exit 1
+          fi
+      - name: Install dependencies
+        # The demo install is needed too: eslint runs typed linting against
+        # demo/tsconfig.json, which resolves types from demo/node_modules
+        run: npm ci --include=dev && cd demo && npm ci
+      - name: Run lint and unit tests
+        run: npm test
+      - name: Publish with provenance
+        # Needs the NPM_TOKEN repository secret: an npm automation token with
+        # publish rights on the package. The prepare script builds dist/
+        # before packing.
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
