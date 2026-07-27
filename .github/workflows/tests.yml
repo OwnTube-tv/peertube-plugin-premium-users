@@ -1,0 +1,30 @@
+name: Tests
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+jobs:
+  test:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          # Match production: our own web servers and PeerTube mainline both
+          # run Node 22
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            demo/package-lock.json
+      - name: Install dependencies
+        # The demo install is needed too: eslint runs typed linting against
+        # demo/tsconfig.json, which resolves types from demo/node_modules
+        run: npm ci --include=dev && cd demo && npm ci
+      - name: Run lint
+        run: npm run lint:script
+      - name: Run unit tests
+        run: npm run test:unit

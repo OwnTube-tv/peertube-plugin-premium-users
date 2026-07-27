@@ -4,10 +4,21 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+  # Manual runs: lets a fork with its own STRIPE_API_KEY secret run the full
+  # E2E suite on any branch — pull_request runs from forks never receive the
+  # base repository's secrets, so this is the way to get a real E2E verdict
+  # on fork PR changes
+  workflow_dispatch:
 jobs:
   test:
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    # Skip on pull requests from forks: those runs never receive the base
+    # repository's secrets, so the suite would only die on an empty
+    # STRIPE_API_KEY. The check reports "skipped" instead of a false
+    # failure; workflow_dispatch (above) is the way to run the full suite
+    # on fork changes.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -36,10 +47,6 @@ jobs:
         working-directory: demo
         run: npx playwright install firefox --with-deps
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-      - name: Run lint
-        run: npm run lint:script
-      - name: Run unit tests
-        run: npm run test:unit
       - name: Run docker compose
         working-directory: demo
         run: docker compose up --build --wait
