@@ -52,7 +52,6 @@ export const renderNonPremiumPage = async ({
 
       restApi.createCheckout({
         allowPromotionCodes: !!(new URLSearchParams(window.location.search).get('allowPromotionCodes')),
-        couponId: price.coupon?.id,
         priceId: price.id
       })
         .then(({ checkoutUrl }: { checkoutUrl: string }) => {

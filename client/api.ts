@@ -58,11 +58,10 @@ export class Api {
   }
 
   async createCheckout (
-    { allowPromotionCodes, couponId, priceId }: { allowPromotionCodes?: boolean, couponId?: string, priceId: string }
+    { allowPromotionCodes, priceId }: { allowPromotionCodes?: boolean, priceId: string }
   ): Promise<{ checkoutUrl: string}> {
     return this.post(this.pluginBasePath + '/checkout', {
       allowPromotionCodes,
-      couponId,
       priceId
     })
   }

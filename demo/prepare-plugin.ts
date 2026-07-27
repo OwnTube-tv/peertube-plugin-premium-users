@@ -3,13 +3,16 @@ import util from 'util'
 import { readFile } from 'fs/promises'
 import Stripe from 'stripe'
 import {
+  PRICE_COUPON_NONE,
   SETTING_ENABLE_PLUGIN,
   SETTING_REPLACEMENT_VIDEO,
   SETTING_STRIPE_API_KEY,
   SETTING_STRIPE_COUPON_ID,
   SETTING_STRIPE_PRODUCT_ID,
   SETTING_STRIPE_WEBHOOK_SECRET,
-  VIDEO_FIELD_IS_PREMIUM_CONTENT
+  VIDEO_FIELD_IS_PREMIUM_CONTENT,
+  getPriceCouponSettingName,
+  getPriceTrialDaysSettingName
 } from '../shared/constants';
 import winston from 'winston';
 const execAsync = util.promisify(exec);
@@ -251,6 +254,8 @@ const configurePlugin = async (webhookSecret: string, replacementVideo: Video): 
       [val.name]: val.options
     }), {}) as { [key: string]: { value: string }[] }
 
+  const productId = options[SETTING_STRIPE_PRODUCT_ID][0]?.value
+
   await ptFetch('/plugins/peertube-plugin-premium-users/settings', {
     headers: {
       'Content-Type': 'application/json'
@@ -260,7 +265,36 @@ const configurePlugin = async (webhookSecret: string, replacementVideo: Video): 
       settings: {
         ...pluginSettings,
         [SETTING_STRIPE_COUPON_ID]: options[SETTING_STRIPE_COUPON_ID][1]?.value,
-        [SETTING_STRIPE_PRODUCT_ID]: options[SETTING_STRIPE_PRODUCT_ID][0]?.value
+        [SETTING_STRIPE_PRODUCT_ID]: productId
+      }
+    })
+  })
+
+  // Give the yearly price a free trial instead of a coupon, so the e2e suite
+  // covers both offers. The monthly price inherits the default coupon. The
+  // per-price settings exist now: the settings PUT above awaits the plugin's
+  // settings-change handling, which registers them.
+  const prices = await stripe.prices.list({ product: productId, type: 'recurring', active: true })
+  const yearlyPrice = prices.data.find((price) => price.recurring?.interval === 'year')
+
+  if (!yearlyPrice) {
+    throw Error(`No yearly price found on product ${productId} — can't configure the free trial.`)
+  }
+
+  logger.info(`Configure a 14 day free trial on the yearly price ${yearlyPrice.id}...`)
+
+  await ptFetch('/plugins/peertube-plugin-premium-users/settings', {
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    method: 'PUT',
+    body: JSON.stringify({
+      settings: {
+        ...pluginSettings,
+        [SETTING_STRIPE_COUPON_ID]: options[SETTING_STRIPE_COUPON_ID][1]?.value,
+        [SETTING_STRIPE_PRODUCT_ID]: productId,
+        [getPriceCouponSettingName(yearlyPrice.id)]: PRICE_COUPON_NONE,
+        [getPriceTrialDaysSettingName(yearlyPrice.id)]: '14'
       }
     })
   })

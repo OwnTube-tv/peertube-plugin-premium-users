@@ -7,7 +7,7 @@ import {
   type PeerTubeHelpers,
   type PluginSettingsManager
 } from '@peertube/peertube-types'
-import { getStripeCustomerMetadataFieldNames } from '../utils'
+import { getStripeCustomerMetadataFieldNames, resolvePriceSettings } from '../utils'
 
 export class CheckoutRoute {
   peertubeHelpers: PeerTubeHelpers
@@ -46,7 +46,11 @@ export class CheckoutRoute {
       return
     }
 
-    const { allowPromotionCodes, couponId, priceId } = req.body
+    const { allowPromotionCodes, priceId } = req.body
+
+    // The coupon/trial configuration is resolved server side from the plugin
+    // settings — the client only picks the price.
+    const { couponId, trialDays } = await resolvePriceSettings(this.settingsManager, priceId)
 
     const customerRes = await stripe.customers.search({
       query: `email:"${user.email}"`
@@ -101,6 +105,13 @@ export class CheckoutRoute {
         mode: 'subscription',
         success_url: `${baseUrl}/my-account/p/premium?checkout_status=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${baseUrl}/my-account/p/premium?checkout_status=canceled`,
+        ...(trialDays
+          ? {
+            subscription_data: {
+              trial_period_days: trialDays
+            }
+          }
+          : {}),
         ...((!couponId || allowPromotionCodes)
           ? {
             allow_promotion_codes: true

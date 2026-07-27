@@ -2,5 +2,7 @@ node_modules
 .cache
 dist
 **/*.local.md
+.local
 .DS_Store
 CLAUDE.md
+.tmp
