@@ -22,6 +22,10 @@ jobs:
           # run Node 22
           node-version: 22
           registry-url: https://registry.npmjs.org
+      - name: Update npm
+        # Trusted publishing (OIDC) requires npm >= 11.5.1; Node 22 bundles
+        # npm 10
+        run: npm install -g npm@latest
       - name: Verify requested version matches package.json
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
@@ -36,9 +40,8 @@ jobs:
       - name: Run lint and unit tests
         run: npm test
       - name: Publish with provenance
-        # Needs the NPM_TOKEN repository secret: an npm automation token with
-        # publish rights on the package. The prepare script builds dist/
-        # before packing.
+        # No token or secret involved: the package's Trusted Publisher
+        # setting on npmjs.com authorizes exactly this repo and workflow via
+        # GitHub OIDC, and npm mints a short-lived credential per run. The
+        # prepare script builds dist/ before packing.
         run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
