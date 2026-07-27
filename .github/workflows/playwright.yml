@@ -13,6 +13,12 @@ jobs:
   test:
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    # Skip on pull requests from forks: those runs never receive the base
+    # repository's secrets, so the suite would only die on an empty
+    # STRIPE_API_KEY. The check reports "skipped" instead of a false
+    # failure; workflow_dispatch (above) is the way to run the full suite
+    # on fork changes.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
