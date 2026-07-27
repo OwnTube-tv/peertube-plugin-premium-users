@@ -24,8 +24,9 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: Update npm
         # Trusted publishing (OIDC) requires npm >= 11.5.1; Node 22 bundles
-        # npm 10
-        run: npm install -g npm@latest
+        # npm 10. Pinned to major 11 so a future npm major can't change
+        # publish behavior unvalidated.
+        run: npm install -g npm@^11.5.1
       - name: Verify requested version matches package.json
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
