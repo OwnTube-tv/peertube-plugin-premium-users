@@ -34,6 +34,7 @@ import {
 import { Storage } from './storage'
 import { SubscriptionRoute } from './routes/subscription'
 import {
+  buildRouteHandlerWrapper,
   getCustomerSubscriptions,
   getStripeCoupons,
   getStripeCustomerMetadataFieldNames,
@@ -525,15 +526,7 @@ async function register ({
   const checkout = new CheckoutRoute(peertubeHelpers, settingsManager, storage)
   const price = new PriceRoute(peertubeHelpers, settingsManager)
 
-  const wrapHandler =
-    (handler: express.Handler) =>
-      (req: express.Request, res: express.Response, next: express.NextFunction) => {
-        try {
-          return handler(req, res, next)
-        } catch (err) {
-          console.error(err)
-        }
-      }
+  const wrapHandler = buildRouteHandlerWrapper(logger)
 
   router.post(
     '/stripe-webhook',

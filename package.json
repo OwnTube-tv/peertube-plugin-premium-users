@@ -1,7 +1,7 @@
 {
   "name": "peertube-plugin-premium-users",
   "description": "PeerTube plugin premium user",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "author": "kontrollanten",
   "bugs": "https://github.com/OwnTube-tv/peertube-plugin-premium-users/issues",
   "clientScripts": [
