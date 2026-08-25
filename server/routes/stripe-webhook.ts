@@ -197,7 +197,7 @@ export class StripeWebhook {
         throw Error(`customer.metadata.${metadataFieldName} is not a number and customer has no provided email.`)
       }
 
-      const id = await this.storage.getUserIdFromEmail(customer.email)
+      const id = await this.storage.getUserIdByEmail(customer.email)
 
       if (id) {
         this.logger.info(`Adding user id ${id} to stripe customer ${customer.id}.`)
