@@ -7,7 +7,9 @@ import {
   SettingEntries,
   MUser,
   type serverHookObject,
-  MVideoFull
+  MVideoFull,
+  MAccount,
+  MChannelBannerAccountDefault,
 } from '@peertube/peertube-types'
 import Stripe from 'stripe'
 import express from 'express'
@@ -46,7 +48,8 @@ import { CheckoutRoute } from './routes/checkout'
 import { PriceRoute } from './routes/price'
 
 interface RegisterServerHookOptions {
-  target: (keyof typeof serverHookObject) | 'filter:api.user.me.get.result'
+  target: (keyof typeof serverHookObject) |
+    'filter:api.account.get.result' // https://github.com/Chocobozzz/PeerTube/pull/7769
   handler: Function
 }
 
@@ -473,7 +476,43 @@ async function register ({
     target: 'filter:api.user.me.get.result',
     handler: async (result: any, { user }: { user: MUser }) => {
       const userInfo = await storage.getUserInfo(user.id)
-      result.isPremium = isPremiumUser(userInfo)
+      const isPremium = isPremiumUser(userInfo)
+      result.isPremium = isPremium
+      // Hide account setup since description and avatar is disabled for non premium
+      result.noAccountSetupWarningModal = isPremium ? result.noAccountSetupWarningModal : true
+
+      return result
+    }
+  })
+
+  try {
+    registerHook({
+      target: 'filter:api.account.get.result',
+      handler: async (result: any, { account }: { account: MAccount }) => {
+        const userInfo = await storage.getUserInfo(account.userId)
+        const isPremium = isPremiumUser(userInfo)
+
+        result.description = isPremium ? result.description : null
+
+        return result
+      }
+    })
+  } catch (err) {
+    console.warn(
+      `Failed to register filter:api.account.get.result hook.
+      Account description will be shown for non-premium users.
+      This hook is available since Peertube 9.`,
+      err
+    )
+  }
+
+  registerHook({
+    target: 'filter:api.video-channel.get.result',
+    handler: async (result: MChannelBannerAccountDefault) => {
+      const userInfo = await storage.getUserInfo(result.Account.userId)
+      const isPremium = isPremiumUser(userInfo)
+
+      result.Account.description = isPremium ? result.Account.description : ''
 
       return result
     }

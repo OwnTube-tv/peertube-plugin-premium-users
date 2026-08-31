@@ -47,3 +47,12 @@
     }
   }
 }
+
+#plugin-selector-profile-form-description-field-group textarea#description {
+  &::placeholder {
+    font-size: 1rem;
+    font-style: italic;
+  }
+
+  opacity: 1;
+}
