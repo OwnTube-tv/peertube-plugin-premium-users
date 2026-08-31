@@ -58,6 +58,28 @@ export async function register ({
   })
 
   registerHook({
+    target: 'action:router.navigation-end',
+    handler: async ({ path }: { path: string }) => {
+      if (['/my-account/settings', '/my-account'].includes(path)) {
+        const user = peertubeHelpers.getUser()
+        const t = peertubeHelpers.translate
+
+        if (user.isPremium) return
+
+        const textareaElem = document.querySelector('#plugin-selector-profile-form-description-field-group textarea')
+
+        if (!textareaElem) {
+          console.warn('Couldn\'t find textarea.')
+          return
+        }
+
+        textareaElem.setAttribute('disabled', 'true')
+        textareaElem.setAttribute('placeholder', await t('Profile description is only available for premium users.'))
+      }
+    }
+  })
+
+  registerHook({
     target: 'filter:internal.common.svg-icons.get-content.result',
     handler: (result: string, icon: { name: string }) => {
       if (icon.name === 'premium') {
