@@ -202,7 +202,9 @@ const ptFetch = async (path: string, { headers, ...options }: RequestInit = {}) 
   try {
     return await resp.json()
   } catch (ignoreErr) {
-    logger.info((opts.method || 'GET') + ' ' + path + ': Couldn\'t parse JSON response')
+    if (resp.status !== 204) {
+      logger.info((opts.method || 'GET') + ' ' + path + ': Couldn\'t parse JSON response ' + resp.status)
+    }
   }
 
   return
