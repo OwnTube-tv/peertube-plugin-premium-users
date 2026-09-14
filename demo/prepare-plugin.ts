@@ -204,6 +204,21 @@ const ptFetch = async (path: string, { headers, ...options }: RequestInit = {}) 
   return
 }
 
+const pruneVideos = async () => {
+  const videos = await ptFetch('/videos') as { data: Array<{ id: number }>}
+
+  logger.info(`Will remove ${videos.data.length} existing videos...`)
+
+  while (videos.data.length) {
+    const video = videos.data.pop()
+    if (!video) continue
+
+    await ptFetch('/videos/' + video.id, { method: 'delete' })
+  }
+
+  logger.info('Done pruning videos')
+}
+
 const uploadVideo = async (name: string, videoPath: string, privacy: number) => {
   const { videoChannels: [videoChannel] } = await ptFetch('/users/me') as { videoChannels: { id: number }[]}
 
@@ -301,6 +316,7 @@ const configurePlugin = async (webhookSecret: string, replacementVideo: Video): 
 }
 
 const run = async () => {
+  await pruneVideos()
   logger.info('Upload videos...')
   const replacementVideo = await uploadVideo('Replacement video', './fixtures/replacement-video.mp4', 2)
   createdVideos.push(replacementVideo.shortUUID)
