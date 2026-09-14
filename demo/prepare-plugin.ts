@@ -259,6 +259,8 @@ const configurePlugin = async (webhookSecret: string, replacementVideo: Video): 
     })
   })
 
+  logger.info('Will fetch registered settings...')
+
   const { registeredSettings } =
     await ptFetch('/plugins/peertube-plugin-premium-users/registered-settings') as RegisteredSettingsResponse
 
