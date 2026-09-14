@@ -14,7 +14,7 @@ import {
   getPriceCouponSettingName,
   getPriceTrialDaysSettingName
 } from '../shared/constants';
-import winston from 'winston';
+import winston, { format } from 'winston';
 const execAsync = util.promisify(exec);
 
 type usedStripeResources = keyof Pick<Stripe, 'products' | 'coupons'>
@@ -48,8 +48,12 @@ let stripe: Stripe
 
 const logger = winston.createLogger({
   levels: winston.config.syslog.levels,
+  format: format.combine(
+    format.errors({ stack: true }),
+    format.prettyPrint({ colorize: true }),
+  ),
   transports: [
-    new winston.transports.Console({ level: 'info' }),
+    new winston.transports.Console({ level: 'debug' }),
     new winston.transports.File({
       filename: '/app.log',
       level: 'info'
