@@ -187,7 +187,7 @@ const completeStripeCheckout = async (page: Page, cardholderName: string): Promi
 
   // Stripe processes the payment (or, for trials, a setup intent) before
   // redirecting back — legitimately slower than a page navigation
-  await page.waitForURL(/premium/i, { timeout: 20_000 })
+  await page.waitForURL(/premium/i, { timeout: 30_000 })
   // Premium status lands via the Stripe webhook roundtrip — also
   // legitimately slower than a few seconds
   await page.getByText(/you're a premium/i).waitFor({ timeout: 20_000 })
