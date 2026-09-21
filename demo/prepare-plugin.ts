@@ -161,6 +161,7 @@ const setup = async () => {
 
   const ptCommands = [
     `npx peertube-cli auth add -u "${PEERTUBE_URL}" -U "root" --password "${PT_INITIAL_ROOT_PASSWORD}"`,
+    'npx peertube-cli plugins uninstall -n peertube-plugin-premium-users',
     'npx peertube-cli plugins install --path /peertube-plugin-premium-users',
     `npx peertube-cli get-access-token --url ${PEERTUBE_URL} --username root --password "${PT_INITIAL_ROOT_PASSWORD}"`
   ]
