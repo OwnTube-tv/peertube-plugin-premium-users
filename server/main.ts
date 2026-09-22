@@ -42,7 +42,8 @@ import {
   getStripeCustomerMetadataFieldNames,
   getStripePrices,
   getStripeProducts,
-  isPremiumUser
+  isPremiumUser,
+  shouldHideAccountDescription
 } from './utils'
 import { CheckoutRoute } from './routes/checkout'
 import { PriceRoute } from './routes/price'
@@ -478,41 +479,45 @@ async function register ({
       const userInfo = await storage.getUserInfo(user.id)
       const isPremium = isPremiumUser(userInfo)
       result.isPremium = isPremium
-      // Hide account setup since description and avatar is disabled for non premium
+      // The description field is disabled for non-premium users, so don't nag them to fill it in
       result.noAccountSetupWarningModal = isPremium ? result.noAccountSetupWarningModal : true
 
       return result
     }
   })
 
-  try {
-    registerHook({
-      target: 'filter:api.account.get.result',
-      handler: async (result: any, { account }: { account: MAccount }) => {
-        const userInfo = await storage.getUserInfo(account.userId)
-        const isPremium = isPremiumUser(userInfo)
+  // `userId` is null for remote accounts, which have no local user to look up
+  const hideAccountDescription = async (userId: number | null | undefined): Promise<boolean> => {
+    if (!isPluginEnabled) return false
+    if (!userId) return shouldHideAccountDescription({ isLocalAccount: false })
 
-        result.description = isPremium ? result.description : null
+    const [userRole, userInfo] = await Promise.all([
+      storage.getUserRole(userId),
+      storage.getUserInfo(userId)
+    ])
 
-        return result
-      }
-    })
-  } catch (err) {
-    console.warn(
-      `Failed to register filter:api.account.get.result hook.
-      Account description will be shown for non-premium users.
-      This hook is available since Peertube 9.`,
-      err
-    )
+    return shouldHideAccountDescription({ isLocalAccount: true, userRole, userInfo })
   }
+
+  // Only available on PeerTube versions that ship https://github.com/Chocobozzz/PeerTube/pull/7769.
+  // Older versions log "Unknown hook ... Skipping." and ignore the registration, they don't throw
+  registerHook({
+    target: 'filter:api.account.get.result',
+    handler: async (result: any, { account }: { account: MAccount }) => {
+      if (await hideAccountDescription(account.userId)) {
+        result.description = ''
+      }
+
+      return result
+    }
+  })
 
   registerHook({
     target: 'filter:api.video-channel.get.result',
     handler: async (result: MChannelBannerAccountDefault) => {
-      const userInfo = await storage.getUserInfo(result.Account.userId)
-      const isPremium = isPremiumUser(userInfo)
-
-      result.Account.description = isPremium ? result.Account.description : ''
+      if (await hideAccountDescription(result.Account?.userId)) {
+        result.Account.description = ''
+      }
 
       return result
     }

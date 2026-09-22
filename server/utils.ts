@@ -153,6 +153,29 @@ export const isPremiumUser = (userInfo: PluginUserInfo | undefined): boolean => 
   return (+new Date(userInfo.paidUntil) - +new Date()) > -ONE_DAY
 }
 
+// Mirrors UserRole of @peertube/peertube-models. @peertube/peertube-types is types-only, so no runtime import
+export const USER_ROLE_ADMINISTRATOR = 0
+export const USER_ROLE_MODERATOR = 1
+
+/**
+ * Whether the description of an account has to be hidden from the API.
+ *
+ * Remote accounts have no local user and are never touched, administrators and moderators are exempt,
+ * everyone else needs an active premium subscription to show a description.
+ */
+export const shouldHideAccountDescription = (options: {
+  isLocalAccount: boolean
+  userRole?: number
+  userInfo?: PluginUserInfo
+}): boolean => {
+  const { isLocalAccount, userRole, userInfo } = options
+
+  if (!isLocalAccount) return false
+  if (userRole === USER_ROLE_ADMINISTRATOR || userRole === USER_ROLE_MODERATOR) return false
+
+  return !isPremiumUser(userInfo)
+}
+
 export const getCustomerSubscriptions = async (
   customer: Stripe.Customer,
   settingsManager: PluginSettingsManager,
