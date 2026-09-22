@@ -14,6 +14,15 @@ To become a premium user a user has to go to My account > Premium and click "Sub
 
 ![Manually add premium user](docs/image.png)
 
+### Account description
+The account description is a common spam vector, so the plugin hides it for everyone except premium users:
+
+* `GET /api/v1/video-channels/{handle}` returns an empty `ownerAccount.description` for non-premium owners.
+* On PeerTube versions that ship [Chocobozzz/PeerTube#7769](https://github.com/Chocobozzz/PeerTube/pull/7769), `GET /api/v1/accounts/{name}` is filtered the same way and the description field in _My account > Settings_ is disabled with a hint.
+* Remote (federated) accounts and administrators/moderators are never affected, and nothing is hidden while the plugin is disabled.
+
+This is presentation-level only: the description can still be set through `PUT /api/v1/users/me`, and it is still rendered in the account page's HTML metadata and ActivityPub objects. Preventing that needs a server-side hook in PeerTube, see [Chocobozzz/PeerTube#7768](https://github.com/Chocobozzz/PeerTube/issues/7768).
+
 ## Prerequisites
 * Stripe API key.
 * Stripe webhook listening for `checkout.session.completed`, `customer.subscription.created`, `invoice.paid` and `invoice.payment_failed` pointed to `{PEERTUBE_URL}/plugins/premium-users/router/stripe-webhook`.
