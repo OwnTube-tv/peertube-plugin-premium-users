@@ -108,6 +108,16 @@ const waitUntilUserIsPremium = async (page: Page) => {
   throw new Error('The /subscription endpoint never returned HTTP 200 within 15s — webhook not processed?')
 }
 
+// The plugin hides the account description of non-premium users on the channel API. The user's default
+// channel is looked up through /users/me since signup derives the username from the display name
+const expectChannelDescription = async (page: Page, token: string, expected: string) => {
+  const headers = { Authorization: 'Bearer ' + token }
+  const me = await (await page.request.get(`${PAGE_URL}/api/v1/users/me`, { headers })).json()
+  const channel = await (await page.request.get(`${PAGE_URL}/api/v1/video-channels/${me.videoChannels[0].name}`)).json()
+
+  expect(channel.ownerAccount.description).toBe(expected)
+}
+
 test.describe('anonymous user', () => {
   test('loads replacement video', async ({ page }) => {
     await page.goto(PAGE_URL);
@@ -115,6 +125,13 @@ test.describe('anonymous user', () => {
     await page.getByText('Premium video').click()
 
     await expectVideoStream(page, { premium: false })
+  })
+
+  // Set by the prep script: administrators are exempt from the description hiding
+  test('sees the description of an administrator', async ({ page }) => {
+    const channel = await (await page.request.get(`${PAGE_URL}/api/v1/video-channels/root_channel`)).json()
+
+    expect(channel.ownerAccount.description).toContain('administrator')
   })
 })
 
@@ -209,9 +226,21 @@ test.describe('authenticated user', () => {
   test('becomes a premium user', async ({ page }) => {
     await signupViaBecomePremium(page, { name: NAME, email: EMAIL, password: PASSWORD })
 
+    // Not premium yet: the description is accepted but hidden from the channel API
+    const token = await waitUntilUsersIsAuthenticated(page)
+    const DESCRIPTION = 'Hello from ' + NAME
+    await page.request.put(`${PAGE_URL}/api/v1/users/me`, {
+      headers: { Authorization: 'Bearer ' + token },
+      data: { description: DESCRIPTION }
+    })
+    await expectChannelDescription(page, token, '')
+
     await page.getByTestId('premium_users-button-pay_month').click()
 
     await completeStripeCheckout(page, 'John Premium')
+
+    // Premium now: the description is shown again
+    await expectChannelDescription(page, token, DESCRIPTION)
   })
 
   test('loads premium video', async ({ page }) => {
