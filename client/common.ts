@@ -60,22 +60,28 @@ export async function register ({
   registerHook({
     target: 'action:router.navigation-end',
     handler: async ({ path }: { path: string }) => {
-      if (['/my-account/settings', '/my-account'].includes(path)) {
-        const user = peertubeHelpers.getUser()
-        const t = peertubeHelpers.translate
+      // The router reports the full URL, including query and fragment (e.g. /my-account/settings#interface-settings)
+      const route = path.split(/[?#]/)[0]
+      if (!['/my-account/settings', '/my-account'].includes(route)) return
 
-        if (user.isPremium) return
+      const user = peertubeHelpers.getUser()
+      if (!user || user.isPremium) return
 
-        const textareaElem = document.querySelector('#plugin-selector-profile-form-description-field-group textarea')
+      // The field group selector only exists on PeerTube versions that ship
+      // https://github.com/Chocobozzz/PeerTube/pull/7769, so stay quiet when it's missing
+      const fieldGroup = document.querySelector('#plugin-selector-profile-form-description-field-group')
+      if (!fieldGroup) return
 
-        if (!textareaElem) {
-          console.warn('Couldn\'t find textarea.')
-          return
-        }
-
-        textareaElem.setAttribute('disabled', 'true')
-        textareaElem.setAttribute('placeholder', await t('Profile description is only available for premium users.'))
+      const textareaElem = fieldGroup.querySelector('textarea')
+      if (!textareaElem) {
+        console.warn('Profile description field group found, but it contains no textarea.')
+        return
       }
+
+      const t = peertubeHelpers.translate
+
+      textareaElem.setAttribute('disabled', 'true')
+      textareaElem.setAttribute('placeholder', await t('Profile description is only available for premium users.'))
     }
   })
 
