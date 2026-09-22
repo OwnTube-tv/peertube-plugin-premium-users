@@ -85,6 +85,15 @@ export class Storage {
     return id
   }
 
+  getUserRole = async (userId: number): Promise<number | undefined> => {
+    const [{ role } = {}] = await this.sequelLight.query(`SELECT role FROM public.user WHERE id = ?`, {
+      type: sequelize.QueryTypes.SELECT,
+      replacements: [userId]
+    }) as { role: number }[]
+
+    return role
+  }
+
   getUserInfo = async (userId?: number): Promise<PluginUserInfo | undefined> => {
     if (!userId) return
 
