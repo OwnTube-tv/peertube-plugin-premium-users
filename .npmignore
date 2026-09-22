@@ -4,3 +4,15 @@ node_modules
 ./client
 ./server
 ./shared
+
+# Local notes, tool state and scratch files that .gitignore already excludes from git.
+# npm ignores .gitignore as soon as .npmignore exists, so they have to be repeated here
+.claude
+.tmp
+.local
+*.local
+*.local/
+.cache
+**/*.local.md
+CLAUDE.md
+.DS_Store

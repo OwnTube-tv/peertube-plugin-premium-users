@@ -6,3 +6,13 @@ demo/playwright-report
 demo/test-results
 demo/.env.stripe
 *.tgz # npm pack file
+# Local notes, tool state and scratch files: keep them out of the demo build context
+.claude
+.tmp
+.local
+*.local
+*.local/
+.cache
+**/*.local.md
+CLAUDE.md
+.DS_Store
