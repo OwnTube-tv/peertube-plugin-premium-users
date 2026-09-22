@@ -6,6 +6,9 @@ import {
   buildRouteHandlerWrapper,
   isPremiumUser,
   ONE_DAY,
+  shouldHideAccountDescription,
+  USER_ROLE_ADMINISTRATOR,
+  USER_ROLE_MODERATOR,
   resolvePriceSettings,
   sortPricesForDisplay
 } from './utils.js'
@@ -18,6 +21,44 @@ import {
 } from '../shared/constants.js'
 
 describe('utils', () => {
+  describe('shouldHideAccountDescription', () => {
+    const premium = { paidUntil: new Date(Date.now() + ONE_DAY * 7).toISOString() }
+    const expired = { paidUntil: new Date(Date.now() - ONE_DAY * 7).toISOString() }
+    const USER = 2
+
+    it('never hides the description of a remote account', () => {
+      equal(shouldHideAccountDescription({ isLocalAccount: false }), false)
+      equal(shouldHideAccountDescription({ isLocalAccount: false, userRole: USER, userInfo: expired }), false)
+    })
+
+    it('never hides the description of an administrator', () => {
+      equal(shouldHideAccountDescription({ isLocalAccount: true, userRole: USER_ROLE_ADMINISTRATOR }), false)
+    })
+
+    it('never hides the description of a moderator', () => {
+      equal(
+        shouldHideAccountDescription({ isLocalAccount: true, userRole: USER_ROLE_MODERATOR, userInfo: expired }),
+        false
+      )
+    })
+
+    it('hides the description of a user without a subscription', () => {
+      equal(shouldHideAccountDescription({ isLocalAccount: true, userRole: USER }), true)
+    })
+
+    it('hides the description of a user whose subscription expired', () => {
+      equal(shouldHideAccountDescription({ isLocalAccount: true, userRole: USER, userInfo: expired }), true)
+    })
+
+    it('shows the description of a premium user', () => {
+      equal(shouldHideAccountDescription({ isLocalAccount: true, userRole: USER, userInfo: premium }), false)
+    })
+
+    it('hides the description when the role is unknown', () => {
+      equal(shouldHideAccountDescription({ isLocalAccount: true }), true)
+    })
+  })
+
   describe('isPremiumUser', () => {
     it('return true if isPaidUntil is in one week', () => {
       const now = new Date().getTime()
