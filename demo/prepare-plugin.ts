@@ -48,15 +48,14 @@ let stripe: Stripe
 
 const logger = winston.createLogger({
   levels: winston.config.syslog.levels,
-  format: format.combine(
-    format.errors({ stack: true }),
-    format.prettyPrint({ colorize: true }),
-  ),
+  format: format.errors({ stack: true }),
   transports: [
-    new winston.transports.Console({ level: 'debug' }),
+    // Colors only make sense on the terminal. /app.log keeps plain JSON lines: the healthcheck greps it for PREP_READY
+    new winston.transports.Console({ level: 'debug', format: format.prettyPrint({ colorize: true }) }),
     new winston.transports.File({
       filename: '/app.log',
-      level: 'info'
+      level: 'info',
+      format: format.json()
     })
   ]
 });
@@ -161,6 +160,8 @@ const setup = async () => {
 
   const ptCommands = [
     `npx peertube-cli auth add -u "${PEERTUBE_URL}" -U "root" --password "${PT_INITIAL_ROOT_PASSWORD}"`,
+    // Reinstalls the freshly built plugin when the instance is reused. On a fresh instance PeerTube logs
+    // "does not exist or is already uninstalled", but peertube-cli still exits 0 so the loop continues
     'npx peertube-cli plugins uninstall -n peertube-plugin-premium-users',
     'npx peertube-cli plugins install --path /peertube-plugin-premium-users',
     `npx peertube-cli get-access-token --url ${PEERTUBE_URL} --username root --password "${PT_INITIAL_ROOT_PASSWORD}"`
@@ -211,19 +212,27 @@ const ptFetch = async (path: string, { headers, ...options }: RequestInit = {}) 
   return
 }
 
+// Root's own videos regardless of privacy: the replacement video is unlisted, so it never shows up in GET /videos
 const pruneVideos = async () => {
-  const videos = await ptFetch('/videos') as { data: Array<{ id: number }>}
+  let removed = 0
 
-  logger.info(`Will remove ${videos.data.length} existing videos...`)
+  for (let page = 0; page < 10; page++) {
+    const { total, data } = await ptFetch('/users/me/videos?count=100') as {
+      total: number
+      data: Array<{ id: number }>
+    }
 
-  while (videos.data.length) {
-    const video = videos.data.pop()
-    if (!video) continue
+    if (data.length === 0) break
 
-    await ptFetch('/videos/' + video.id, { method: 'delete' })
+    logger.info(`Will remove ${data.length} of ${total} existing videos...`)
+
+    for (const video of data) {
+      await ptFetch('/videos/' + video.id, { method: 'delete' })
+      removed++
+    }
   }
 
-  logger.info('Done pruning videos')
+  logger.info(`Done pruning videos, removed ${removed}`)
 }
 
 const uploadVideo = async (name: string, videoPath: string, privacy: number) => {
@@ -326,6 +335,14 @@ const configurePlugin = async (webhookSecret: string, replacementVideo: Video): 
 
 const run = async () => {
   await pruneVideos()
+
+  // Administrators keep their description, the e2e suite asserts it on root's channel
+  await ptFetch('/users/me', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ description: 'Root is an administrator, its description is never hidden' })
+  })
+
   logger.info('Upload videos...')
   const replacementVideo = await uploadVideo('Replacement video', './fixtures/replacement-video.mp4', 2)
   createdVideos.push(replacementVideo.shortUUID)
