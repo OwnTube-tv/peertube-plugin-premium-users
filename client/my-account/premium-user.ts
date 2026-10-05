@@ -1,6 +1,6 @@
 import { RegisterClientHelpers } from '@peertube/peertube-types/client'
 import { Subscription, SubscriptionInvoice } from '../../server/types'
-import { SETTING_STRIPE_CUSTOMER_PORTAL_URL } from '../../shared/constants'
+import { SETTING_STRIPE_CUSTOMER_PORTAL_URL, UNSUBSCRIBE_FORM_EMBED_CODE } from '../../shared/constants'
 import { Api } from '../api'
 import { UiBuilder } from '../ui/ui-builder'
 
@@ -47,16 +47,27 @@ export const renderPremiumPage = async ({
   cancelButton.addEventListener('click', (): void => {
     cancelButton.setAttribute('disabled', 'disabled')
     /**
-   * TODO: Add loader
-   */
+     * TODO: Add loader
+     */
 
     restApi.updateSubscription({
       cancelAtPeriodEnd: !subscription.cancelAtPeriodEnd
     })
-      .then(() => {
+      .then(async () => {
+        const settings = await peertubeHelpers.getSettings()
+        const embedCode = settings[UNSUBSCRIBE_FORM_EMBED_CODE]
+
+        if (!subscription.cancelAtPeriodEnd && embedCode) {
+          const formElem = document.createElement('div')
+          formElem.innerHTML = embedCode.toString()
+          rootEl.prepend(uiBuilder.renderRow([uiBuilder.h2(await translate('Why did you unsubscribe?'))], [formElem]))
+
+          return
+        }
+
         /**
-       * TODO: Repaint instead of page reload
-       */
+         * TODO: Repaint instead of page reload
+         */
         window.location.reload()
       })
       .catch(async (err: any) => {

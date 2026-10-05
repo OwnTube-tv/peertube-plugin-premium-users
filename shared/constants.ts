@@ -7,6 +7,7 @@ export const SETTING_STRIPE_WEBHOOK_SECRET = 'stripe-webhook-secret'
 export const SETTING_REPLACEMENT_VIDEO = 'replacement-video-url'
 export const SETTING_WHITELIST_USER_AGENT = 'whitelist-user-agent'
 export const SETTING_PRICE_SORT_ORDER = 'price-sort-order'
+export const UNSUBSCRIBE_FORM_EMBED_CODE = 'unsubscribe-form-embed-code'
 export const VIDEO_FIELD_IS_PREMIUM_CONTENT = 'is-premium-content'
 
 export const PRICE_SORT_LOWEST_FIRST = 'lowest-first'
