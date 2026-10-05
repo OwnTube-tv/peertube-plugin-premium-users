@@ -27,6 +27,7 @@ import {
   SETTING_STRIPE_PRODUCT_ID,
   SETTING_STRIPE_WEBHOOK_SECRET,
   SETTING_WHITELIST_USER_AGENT,
+  UNSUBSCRIBE_FORM_EMBED_CODE,
   VIDEO_FIELD_IS_PREMIUM_CONTENT,
   getPriceCouponSettingName,
   getPriceTrialDaysSettingName
@@ -156,6 +157,17 @@ async function register ({
     ],
     private: true,
     descriptionHTML: 'The order in which the payment alternatives are presented on the Become premium pages.'
+  })
+
+  registerSetting({
+    name: UNSUBSCRIBE_FORM_EMBED_CODE,
+    label: 'Iframe to show upon unsubscribe',
+    descriptionHTML: `
+      Paste an iframe HTML code to be rendered after a successful unsubscription.
+      This can be useful for showing a Google Form to get information about why the user unsubscribed.`,
+    type: 'input-textarea',
+    default: '',
+    private: false
   })
 
   const loadReplacementVideo = async (replacementVideoUrl: string): Promise<void> => {
